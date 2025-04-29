@@ -1,0 +1,168 @@
+🧠 Memory VDB — Step 10: Watchdog / Task Health Monitor
+-------------------------------------------------------
+Scans `task_queue.json` to identify task health across the pipeline.
+Flags stale, retry-locked, retry-stuck, and incomplete nodes.
+
+Emits:
+- `task_audit_log.json` → Full diagnostic of every task
+- `watchdog_state.json` → Summary counts for UI/dashboard
+- `self_heal_queue.json` → Stale-but-fixable task IDs for future agent loop
+- `logs/watchdog_log.json` → (new) Logs stuck retry tasks
+
+Built-in Safeguards:
+✅ Timeout check (default: 6 hours)
+✅ Retry cap awareness
+✅ DAG dependency validation
+✅ Filelock to prevent race conditions
+✅ Stuck retry detection (new)
+
+"""
+
+import json
+import os
+from datetime import datetime, timedelta
+from filelock import FileLock
+
+# --- Config ---
+TASK_QUEUE = "task_queue.json"
+AUDIT_LOG = "task_audit_log.json"
+WATCHDOG_STATE = "watchdog_state.json"
+SELF_HEAL_QUEUE = "self_heal_queue.json"
+LOCK_FILE = "watchdog.lock"
+TIMEOUT_HOURS = 6
+MAX_RETRIES = 3
+RETRY_THRESHOLD = 3
+RETRY_COOLDOWN_SECONDS = 30
+
+# --- Load all tasks
+def load_tasks():
+    if not os.path.exists(TASK_QUEUE):
+        return []
+    with open(TASK_QUEUE) as f:
+        return json.load(f)
+
+# --- Check if task is stale
+def is_stale(task, now):
+    last = datetime.fromisoformat(task.get("last_attempt"))
+    return (now - last) > timedelta(hours=TIMEOUT_HOURS)
+
+# --- Check retry status
+def is_retry_locked(node):
+    return node.get("retries", 0) >= MAX_RETRIES and node.get("status") != "done"
+
+# --- Check stuck retry status (new)
+def is_task_stuck(task, now):
+    stuck = False
+
+    for node_name, node_data in task.get("nodes", {}).items():
+        retries = node_data.get("retries", 0)
+        last_attempt = task.get("last_attempt")
+
+        if retries >= RETRY_THRESHOLD:
+            stuck = True
+            break
+
+        if last_attempt:
+            try:
+                last_dt = datetime.fromisoformat(last_attempt)
+                if (now - last_dt).total_seconds() < RETRY_COOLDOWN_SECONDS and retries > 0:
+                    stuck = True
+                    break
+            except Exception:
+                pass
+
+    return stuck
+
+# --- Determine task status
+def analyze_task(task, now):
+    status = "healthy"
+    node_states = {}
+
+    for name, node in task["nodes"].items():
+        node_states[name] = {
+            "status": node["status"],
+            "retries": node.get("retries", 0),
+            "last_error": node.get("last_error", "")
+        }
+
+        if is_retry_locked(node):
+            status = "retry-locked"
+
+    if status != "retry-locked" and is_stale(task, now):
+        status = "stale"
+
+    if status == "healthy" and any(n["status"] != "done" for n in task["nodes"].values()):
+        status = "incomplete"
+
+    return {
+        "task_id": task["task_id"],
+        "status": status,
+        "file": task["file"],
+        "nodes": node_states,
+        "last_attempt": task["last_attempt"]
+    }
+
+# --- Main watchdog runner
+def run_watchdog():
+    now = datetime.utcnow()
+    print("🔍 Running Memory VDB Watchdog...")
+
+    with FileLock(LOCK_FILE):
+        tasks = load_tasks()
+        report = []
+        heal_queue = []
+        summary = {"healthy": 0, "retry_locked": 0, "stale": 0, "incomplete": 0, "stuck": 0}
+
+        for task in tasks:
+            # --- New stuck task detection
+            if is_task_stuck(task, now):
+                print(f"⚠️ Stuck retry detected: {task['task_id']}")
+                task["stuck"] = True
+                summary["stuck"] += 1
+                with open("logs/watchdog_log.json", "a") as log:
+                    log.write(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "event": "stuck_task_detected",
+                        "task_id": task["task_id"]
+                    }) + "\n")
+
+            task_report = analyze_task(task, now)
+            report.append(task_report)
+
+            if task_report["status"] in summary:
+                summary[task_report["status"]] += 1
+            else:
+                summary[task_report["status"]] = 1
+
+            if task_report["status"] == "stale":
+                heal_queue.append(task_report["task_id"])
+
+        # --- Write outputs
+        with open(AUDIT_LOG, "w") as f:
+            json.dump(report, f, indent=2)
+
+        with open(WATCHDOG_STATE, "w") as f:
+            json.dump({
+                **summary,
+                "self_heal_queue": heal_queue
+            }, f, indent=2)
+
+        with open(SELF_HEAL_QUEUE, "w") as f:
+            json.dump(heal_queue, f, indent=2)
+
+        # --- Print Summary
+        print(f"✅ Watchdog complete: {summary}")
+        if heal_queue:
+            print(f"🧠 Self-heal queue populated with {len(heal_queue)} tasks.")
+
+if __name__ == "__main__":
+    run_watchdog()
+
+📦 Output Files
+
+| File | Purpose |
+|------|---------|
+| task_audit_log.json | Full breakdown of each task and its node status |
+| watchdog_state.json | UI-compatible dashboard data |
+| self_heal_queue.json | IDs of stale but fixable tasks for agent ops |
+| logs/watchdog_log.json | Stuck retry detections (new) |

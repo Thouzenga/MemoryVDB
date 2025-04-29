@@ -1,0 +1,194 @@
+🧩 Step 6 — FAISS Vector Ingestion
+
+🎯 Purpose
+To ingest finalized memory files (.txt) into FAISS-based vector databases, enabling semantic memory recall.
+
+✅ Core Actions (What Happens)
+
+Trigger: after Save Manager modifies a memory file
+
+- Load the file from /Data/[Zone]/[File].txt  
+- Chunk it into 300–500 token segments  
+- Deduplicate each chunk using ingest_hash.json  
+- Embed each chunk via OpenAI (or local model)  
+- Write chunks to appropriate FAISS .index file (one per zone)  
+- Use a .lock file to prevent concurrent writes  
+- Log new hashes to ingest_hash.json  
+- ✅ Log vector ingests to memory_changelog.json (added patch)  
+- ✅ Validate FAISS + PKL files before use (new patch)  
+
+📁 Required Files and Scripts
+
+**ingest.py**  
+Main ingestion script. Usage:
+
+```bash
+python ingest.py --file Data/Meta/AI_Architecture.txt
+Hooks into:
+
+vector_tools.py for chunking, embedding, and FAISS updates
+
+paths.json to locate index files
+
+ingest_hash.json for deduplication
+
+.lock files for safe access
+
+PATCHED (add to ingest.py)
+
+python
+Copy
+Edit
+import json
+import os
+import faiss
+import pickle
+from datetime import datetime
+
+# Log vector memory entry to changelog
+def log_vector_ingest(file_path, input_hash, chat_name=None, message_id=None, zone=None, tags=None):
+    entry = {
+        "file": file_path,
+        "action": "vector_ingest",
+        "timestamp": datetime.now().isoformat(),
+        "input_hash": input_hash,
+        "zone": zone,
+        "tags": tags or [],
+        "source": "ingest",
+        "chat_name": chat_name or "UNKNOWN_CHAT",
+        "message_id": message_id or "UNKNOWN_MSG"
+    }
+    with open("memory_changelog.json", "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+# Validate FAISS index before using
+def validate_faiss_index(index_path):
+    if not os.path.exists(index_path):
+        raise FileNotFoundError(f"❌ FAISS index not found at: {index_path}")
+    try:
+        index = faiss.read_index(index_path)
+        dim = index.d  # sanity check
+        print(f"✅ FAISS index valid — dim={dim}")
+        return index
+    except Exception as e:
+        raise RuntimeError(f"❌ FAISS index corrupted or unreadable: {e}")
+
+# (Optional) Validate .pkl file for metadata
+def validate_pickle(path):
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception as e:
+        raise RuntimeError(f"❌ Metadata .pkl file is corrupted: {e}")
+Then, after successful ingest:
+
+python
+Copy
+Edit
+log_vector_ingest(
+    file_path,
+    input_hash=metadata.get("input_hash"),
+    chat_name=metadata.get("chat_name"),
+    message_id=metadata.get("message_id"),
+    zone=zone_detected,
+    tags=metadata.get("tags")
+)
+📁 vector_tools.py — Functions Needed
+
+python
+Copy
+Edit
+def split_text(text, max_tokens=500):
+    # Split on sentence boundaries using spaCy or similar
+    ...
+
+def embed_text(chunks):
+    # Send to OpenAI embeddings or local model
+    ...
+
+def write_to_faiss(index_path, vectors, metadata):
+    # Use FAISS to write each vector to the correct index
+    ...
+📂 paths.json (Example Additions)
+
+json
+Copy
+Edit
+{
+  "vdb_root": "VDB_Templates/",
+  "index_map": {
+    "Meta": "VDB_Templates/Meta.index",
+    "Projects": "VDB_Templates/Projects.index",
+    "Core": "VDB_Templates/Core.index"
+  }
+}
+📜 ingest_hash.json (Scaffold)
+
+json
+Copy
+Edit
+{}
+📌 Format after ingesting a file:
+
+json
+Copy
+Edit
+{
+  "Meta/AI_Architecture.txt": [
+    "a7b8c6e2...chunk1hash",
+    "f8d0a1e3...chunk2hash"
+  ]
+}
+Use SHA256 hash of chunk text as unique key
+Skip any chunk already recorded here
+
+🔐 Lock File System
+
+Before writing to a FAISS index:
+
+python
+Copy
+Edit
+from filelock import FileLock
+lock = FileLock("VDB_Templates/Meta.index.lock")
+with lock:
+    write_to_faiss(...)
+✅ Metadata Per Vector (Attach This)
+
+json
+Copy
+Edit
+{
+  "text": "This is the memory chunk...",
+  "source_file": "Meta/AI_Architecture.txt",
+  "chat_name": "GPT Memory Build",
+  "message_id": "msg_472-20",
+  "input_hash": "a6f32...",
+  "timestamp": "2025-04-23T15:00:00Z",
+  "tags": ["llama", "architecture", "vdb"]
+}
+This enables future vector queries to trace results back to the chat that created them.
+
+🧪 Optional Add-ons
+
+vdb:ingest [file] — CLI or GPT command to trigger ingestion
+
+ingest_log.json — Optional ingestion log with file, chunk count, and status
+
+Background ingestion queue — to avoid blocking bop flow (later)
+
+🛡️ Final Safeguards Recap
+
+
+Risk	Fix
+Duplicate vector entries	ingest_hash.json
+Unsafe index writes	.lock files per index
+Poor chunks	Clean sentence-based chunker
+Metadata loss	Embed all context per chunk
+Untracked ingests	✅ memory_changelog logging ✅
+Corrupted indexes	✅ validate_faiss_index + pkl ✅
+pgsql
+Copy
+Edit

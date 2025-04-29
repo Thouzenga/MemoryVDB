@@ -1,0 +1,127 @@
+🧠 Memory VDB — Step 8: DAG-Based Retry Orchestration
+-----------------------------------------------------
+This script executes pending memory operations tracked in task_queue.json.
+Each task uses a DAG-style node structure with dependencies and retry caps.
+
+Purpose:
+- Automatically retry failed upload or ingest steps
+- Respect step dependencies (e.g., upload waits for write)
+- Prevent infinite retry loops
+- Add retry cooldown guard (new)
+- Track last attempt, retries, and task status
+
+Used in: bop → write → upload → ingest flow
+"""
+
+import os
+import json
+from datetime import datetime, timedelta
+from filelock import FileLock
+
+TASK_FILE = "task_queue.json"
+LOCK_FILE = "retry_runner.lock"
+MAX_RETRIES = 3
+RETRY_COOLDOWN_SECONDS = 60
+RETRY_LOG_PATH = "logs/retry_runner_log.json"
+
+# Replace these with real implementations
+def retry_upload(file):
+    print(f"[UPLOAD] Retried upload for: {file}")
+    return True  # Simulate success
+
+def retry_ingest(file):
+    print(f"[INGEST] Retried ingest for: {file}")
+    return True  # Simulate success
+
+def load_tasks():
+    with open(TASK_FILE) as f:
+        return json.load(f)
+
+def save_tasks(task_list):
+    with open(TASK_FILE + ".tmp", "w") as f:
+        json.dump(task_list, f, indent=2)
+    os.replace(TASK_FILE + ".tmp", TASK_FILE)
+
+def all_deps_satisfied(node, nodes):
+    return all(nodes[dep]["status"] == "done" for dep in node.get("depends_on", []))
+
+# --- Cooldown-aware retry checker (NEW)
+def should_retry(task, node_name):
+    node = task["nodes"].get(node_name, {})
+    last_attempt = task.get("last_attempt")
+    if not last_attempt:
+        return True
+
+    try:
+        last_dt = datetime.fromisoformat(last_attempt)
+        if (datetime.now() - last_dt).total_seconds() < RETRY_COOLDOWN_SECONDS:
+            with open(RETRY_LOG_PATH, "a") as log:
+                log.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "task_id": task["task_id"],
+                    "node": node_name,
+                    "event": "retry_skipped (cooldown)"
+                }) + "\n")
+            return False
+    except Exception:
+        pass
+
+    return True
+
+def retry_task_node(task, node_name):
+    file = task["file"]
+    node = task["nodes"][node_name]
+
+    if node["status"] == "done" or node["retries"] >= MAX_RETRIES:
+        return
+
+    if not all_deps_satisfied(node, task["nodes"]):
+        return
+
+    if not should_retry(task, node_name):
+        return  # Respect cooldown
+
+    print(f"🧠 Retrying step '{node_name}' for task {task['task_id']}...")
+
+    try:
+        if node_name == "upload":
+            success = retry_upload(file)
+        elif node_name == "ingest":
+            success = retry_ingest(file)
+        else:
+            print(f"[⚠️] Unknown step '{node_name}' — skipping")
+            return
+
+        if success:
+            node["status"] = "done"
+        else:
+            node["retries"] += 1
+
+    except Exception as e:
+        print(f"[❌] Step '{node_name}' failed: {e}")
+        node["retries"] += 1
+
+def run_retry_pipeline():
+    print("🔁 Starting Memory VDB retry runner (Step 8)...")
+
+    with FileLock(LOCK_FILE):
+        task_list = load_tasks()
+        updated = False
+
+        for task in task_list:
+            for step in task["nodes"]:
+                node = task["nodes"][step]
+                if node["status"] != "done" and node["retries"] < MAX_RETRIES:
+                    retry_task_node(task, step)
+                    updated = True
+
+            task["last_attempt"] = datetime.now().isoformat()
+
+        if updated:
+            save_tasks(task_list)
+            print("✅ Task queue updated.")
+        else:
+            print("👍 No retries needed.")
+
+if __name__ == "__main__":
+    run_retry_pipeline()

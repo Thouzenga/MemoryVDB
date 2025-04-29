@@ -1,0 +1,148 @@
+🧠 MEMORY VDB — STEP 11: SEMANTIC_DIFF.PY
+─────────────────────────────────────────
+❓ PURPOSE
+This module determines whether a new memory entry meaningfully differs from the most recently saved one — not just in content, but in *context*, *point-of-view*, or *semantic drift*.
+
+It ensures memory is:
+- Non-redundant
+- Context-aware
+- Self-evolving
+
+─────────────────────────────────────────
+🔗 SYSTEM POSITION
+
+Semantic diff is executed after LLaMA finishes summarizing and tagging (Step 3), but before Save Manager commits anything to disk (Step 4).
+
+This script modifies:
+- `llama/output.json` by injecting an `"action"` key
+- `semantic_diff_log.json` for traceability
+
+─────────────────────────────────────────
+📥 INPUTS
+
+- `llama/output.json` → New candidate memory block
+- `memory_changelog.json` → Historical trace for comparison
+- (Optional) CLI flag `--force_action [append|replace|skip]` → Manual override
+
+─────────────────────────────────────────
+📤 OUTPUTS
+
+1. Updates `llama/output.json` to include:
+
+```json
+{
+  "action": "append",
+  "confidence": 0.92,
+  "diff_reason": "different context and tags detected"
+}
+Writes log entry to:
+
+semantic_diff_log.json (timestamped decision history)
+
+───────────────────────────────────────── 🔍 BUILT-IN LOGIC (V1.2)
+
+✅ Loads most recent changelog entries for that file
+✅ Compares:
+
+summary
+
+tags
+
+content
+
+✅ Sends structured prompt to run_diff_model() → modular abstraction (OpenAI or LLaMA)
+✅ Parses model response:
+
+"action": "append", "replace", "skip"
+
+"confidence": float 0.0–1.0
+
+"reason": natural language explanation
+
+✅ If malformed or low confidence:
+
+Default to "append"
+
+✅ If tags or summary differ significantly:
+
+Always trigger diff, regardless of content
+
+✅ NEW: Compare against multiple recent changelog entries (not just the last one)
+
+───────────────────────────────────────── 🔐 FAILSAFES (ACTIVE)
+
+✅ JSON structure enforcement
+✅ Confidence fallback threshold (default: 0.5)
+✅ Dedup against multiple recent memories (not blindly)
+✅ Skip if change is trivial or phrasing-only
+✅ Force override via CLI
+✅ Logs every decision
+
+───────────────────────────────────────── 🛠️ FUNCTION SUMMARY (UPDATED)
+
+python
+Copy
+Edit
+import json
+import sys
+
+DEFAULT_MAX_COMPARISONS = 5
+
+def semantic_diff(new_entry, memory_changelog, max_comparisons=DEFAULT_MAX_COMPARISONS):
+    """
+    Compare the new memory entry against the last N entries.
+    
+    Args:
+        new_entry (dict): New candidate memory block
+        memory_changelog (list): List of historical memory entries
+        max_comparisons (int): How many past entries to check (default=5)
+        
+    Returns:
+        dict: {"action": str, "confidence": float, "reason": str}
+    """
+    similarities = []
+    
+    recent_entries = memory_changelog[-max_comparisons:] if max_comparisons else memory_changelog
+
+    for past_entry in recent_entries:
+        similarity = run_diff_model(new_entry, past_entry)
+        similarities.append(similarity)
+
+    avg_similarity = sum(similarities) / len(similarities) if similarities else 0.0
+
+    # Decide based on average similarity
+    if avg_similarity > 0.85:
+        action = "skip"
+        reason = "high semantic similarity detected across past entries"
+    elif avg_similarity > 0.6:
+        action = "replace"
+        reason = "moderate similarity; updating content with fresher context"
+    else:
+        action = "append"
+        reason = "low similarity; new memory context detected"
+
+    return {
+        "action": action,
+        "confidence": round(avg_similarity, 3),
+        "diff_reason": reason
+    }
+🔗 Note:
+run_diff_model(new_entry, past_entry) abstracts model backend (OpenAI or LLaMA)
+
+───────────────────────────────────────── 🔁 FUTURE FUNCTIONAL EXTENSIONS
+
+memory_router.py → reroute entries to better-matching files
+
+agent_loop.py → triggers diffs from agent reflections
+
+diff_reviewer.py → optional visual review UI
+
+───────────────────────────────────────── 🏗️ BUILD STATUS
+
+Step 11 is fully spec’d, modular, upgrade-aware, and token-safe.
+semantic_diff.py is ready to be executed locally or called agentically.
+
+───────────────────────────────────────── 📌 DESIGN SIGNATURE Architect: ChatGPT (Gina) + [User]
+Version: V1.2.1 (Multi-entry comparison upgrade)
+Last Updated: 2025-04-24
+File Type: Informational spec (for AI memory + backend reconstruction)

@@ -1,0 +1,196 @@
+🧠 VDB TEMPLATE PLAN — FULL SYSTEM SUMMARY
+────────────────────────────────────────────
+🔧 WHAT THIS IS  
+You have built a reusable Vector Database Template that:
+
+- Ingests .txt and .pdf files  
+- Splits them into chunks  
+- Embeds them using OpenAI  
+- Stores them in a FAISS index  
+- Allows for local querying via a Flask API (/query endpoint)  
+
+This system is project-agnostic and meant to be copied and customized per use case (e.g. “Master Memory”).
+
+────────────────────────────────────────────
+📂 WHAT FILES ARE ON YOUR MACHINE (IN /Documents/VDB Template)
+
+VDB Template/ ├── app.py # Flask server for querying the vector DB ├── ingest.py # Script to load docs and create FAISS index ├── query.py # Local CLI querying script (if needed) ├── vector_tools.py # Core logic: loading, chunking, embedding ├── .env # Your OpenAI API key lives here ├── utils/ # [LEGACY] Now unused after moving vector_tools.py up │ └── init.py # [safe to delete] ├── Faiss_index/ # Will contain your index (after ingest.py runs) │ └── index.faiss, index.pkl ├── Data/ # Drop your .txt or .pdf files here │ └── example.txt ├── README.md # [Optional] You can document usage here ├── venv/ # Virtual environment (already set up)
+
+pgsql
+Copy
+Edit
+
+────────────────────────────────────────────
+✅ WHAT WE FIXED IN THIS CHAT
+
+✔ Fixed broken imports due to wrong file structure (`utils/vector_tools.py` → root)  
+✔ Added `__init__.py` for clean packaging (now removable)  
+✔ Fixed pathing errors via project-root enforcement  
+✔ Enabled `allow_dangerous_deserialization=True` for FAISS loads  
+✔ Resolved deprecated LangChain imports  
+
+---
+
+✅ WHAT YOU STILL NEED TO ADD (WHEN YOU BUILD)
+🛠 These are structural upgrades that must be applied to the VDB Template **at build time**:
+
+### 🔧 Embedding Backend Switch
+
+Add to `paths.json`:
+
+```json
+"embedding_backend": "openai"  // Options: "openai", "llama"
+Update vector_tools.py:
+
+embed_text() dispatches by backend
+
+Supports embed_openai() + embed_llama() stubs
+
+Safe dummy vectors for now (actual logic injects later)
+
+📦 Source: Memory VDB Patch 15 — not included in base template
+☑ Will allow future offline support, local inference, and zero-token workflows
+
+🧼 SYSTEM RULE:
+Once these patches are applied, re-save this folder as a new memory template baseline.
+
+🧪 HOW TO USE THE TEMPLATE (Every Time)
+
+🔹 Step 1: Open Terminal in project root
+
+bash
+Copy
+Edit
+cd ~/Documents/VDB\ Template
+🔹 Step 2: Activate your environment
+
+bash
+Copy
+Edit
+source venv/bin/activate
+🔹 Step 3: Put your files into /Data
+
+.txt and .pdf are supported
+
+You can delete example.txt
+
+🔹 Step 4: Run ingestion to build FAISS index
+
+bash
+Copy
+Edit
+python3 ingest.py
+🔹 Step 5: Run the query server
+
+bash
+Copy
+Edit
+python3 app.py
+You will now have a POST endpoint running at:
+
+bash
+Copy
+Edit
+http://localhost:5000/query
+POST Example:
+
+json
+Copy
+Edit
+POST /query
+Content-Type: application/json
+
+{
+  "query": "What does this file say about X?"
+}
+──────────────────────────────────────────── 🧼 REMEMBER THIS
+
+This template is NOT meant to be edited directly once stable.
+→ Copy the folder to create new projects (e.g. “Master Memory”)
+
+Always re-run ingest.py if you change the files in /Data
+
+If you see ModuleNotFoundError, check your working directory
+
+FAISS files are stored in /Faiss_index — don’t rename unless you patch all references
+
+──────────────────────────────────────────── 📌 VERSION STATUS
+
+This is now your Template V1.2-prep baseline
+Includes: ✔ structural fixes, ✔ safety upgrades, 🕑 pending: backend logic inject
+
+yaml
+Copy
+Edit
+
+
+"""
+🧠 Vector Tools — Memory VDB Utility Module
+------------------------------------------
+Core vector logic for:
+- Text chunking
+- Embedding (OpenAI / LLaMA switchable)
+- FAISS index write + load
+
+Backend is defined in paths.json:
+{
+  "embedding_backend": "openai"
+}
+
+Safe to import into:
+- ingest.py
+- memory_query.py
+"""
+
+import os
+import json
+import hashlib
+
+# --- Backend Config ---
+def load_backend_config():
+    if not os.path.exists("paths.json"):
+        raise FileNotFoundError("paths.json missing")
+    with open("paths.json") as f:
+        return json.load(f).get("embedding_backend", "openai")
+
+# --- Embedding Dispatcher ---
+def embed_text(text_chunks):
+    backend = load_backend_config()
+
+    if backend == "openai":
+        return embed_openai(text_chunks)
+    elif backend == "llama":
+        return embed_llama(text_chunks)
+    else:
+        raise ValueError(f"Unknown embedding backend: {backend}")
+
+# --- Embedding Stubs ---
+def embed_openai(chunks):
+    print("🔗 [OpenAI] Embedding", len(chunks), "chunks...")
+    return [[0.0] * 1536 for _ in chunks]  # Replace with real API logic
+
+def embed_llama(chunks):
+    print("💻 [LLaMA] Local embedding", len(chunks), "chunks...")
+    return [[0.0] * 1536 for _ in chunks]  # Replace with real local logic
+
+# --- Text Chunking Stub ---
+def split_text(text, max_tokens=500):
+    # TODO: Replace with sentence-aware chunker using spaCy or tiktoken
+    return [text[i:i+max_tokens] for i in range(0, len(text), max_tokens)]
+
+# --- FAISS Write Stub ---
+def write_to_faiss(index_path, vectors, metadata):
+    # TODO: Implement FAISS write logic
+    print(f"🧠 [FAISS] Writing {len(vectors)} vectors to: {index_path}")
+    pass
+
+# --- FAISS Load Stub ---
+def load_faiss_index(index_path):
+    # TODO: Load FAISS index and metadata store
+    print(f"📂 [FAISS] Loading index from: {index_path}")
+    return DummyIndex(), []
+
+# --- Dummy Index (Safe Fallback) ---
+class DummyIndex:
+    def search(self, vector, k):
+        return [[0.0] * k], [[-1] * k]

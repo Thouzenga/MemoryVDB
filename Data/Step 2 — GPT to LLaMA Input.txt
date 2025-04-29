@@ -1,0 +1,112 @@
+🧩 Step 2 — GPT Writes LLaMA Input (Detailed Logic + Safeguards)
+
+🎯 Purpose
+
+To ensure that every memory summary passed to LLaMA is:
+
+Formatted consistently
+
+Cleaned and trimmed for context limits
+
+Checked for prior processing to avoid duplication
+
+Logged with full trace metadata
+
+Stored in a predictable path (llama/input.txt)
+
+Ready for structured JSON output from LLaMA
+
+🛠 Workflow
+
+Trigger: ChatGPT or save manager reaches Step 2 in bop
+
+Source Text: GPT selects and chunks recent conversation (~3,000 tokens max)
+
+Hashing: SHA256 hash generated from content
+
+Deduplication Check: If input_hash.json contains the hash → skip LLaMA
+
+Template Fill: Chunks inserted into summarize_and_tag.txt
+
+Metadata Inject: Add chat_name, message_id, and input_hash into the input text
+
+Write File: Final prompt saved to path from paths.json
+
+✅ Required Files
+
+summarize_and_tag.txt → Contains the formatting and instructions for LLaMA
+
+llama/input.txt → File that LLaMA reads from (path configurable)
+
+input_hash.json → Tracks previously processed chunks
+
+paths.json → Central path configuration
+
+🔧 Failures + Fixes
+
+❌ Missing or Corrupted Template
+
+✅ Use inline fallback template
+
+✅ Templates are versioned: v1, v2, default
+
+✅ SHA checksum logged during use for integrity check
+
+❌ Wrong File Path
+
+✅ All paths pulled from paths.json
+
+✅ Validate file/directory existence before write
+
+✅ Log path failures to path_errors.log
+
+❌ Duplicate Input Reprocessing
+
+✅ GPT calculates content hash
+
+✅ If hash is in input_hash.json, input is skipped
+
+✅ Otherwise, hash and metadata are logged before execution
+
+❌ Old Inputs Not Cleared
+
+✅ Each run truncates file and writes a timestamp header:
+
+# GENERATED ON: YYYY-MM-DD HH:MM
+
+❌ Unescaped Characters / Markdown Breaks Prompt
+
+✅ Sanitizer replaces smart quotes and escapes special characters
+
+❌ Overlong Prompt (LLaMA Limit)
+
+✅ GPT limits chunks to ~3,000 tokens
+
+✅ Optional validate_prompt_length.py logs overflow risk
+
+🧪 Example: Final Prompt Written to File
+
+# GENERATED ON: 2025-04-23
+CHAT: GPT Memory Build
+MSG_ID: msg_472-20
+HASH: a7b2e34...
+
+INSTRUCTION:
+Summarize and tag the following conversation.
+
+GOAL:
+Extract insights, remove noise, and tag the entry.
+
+CONTENT:
+[user's chunked memory input here]
+
+🧠 Future Expansion
+
+Allow multiple input formats (e.g. tag-first, summarize-only)
+
+Use prompt variants for testing different summarization styles
+
+Automate hash deduplication reporting for audit purposes
+
+Module: Step 2 — GPT ➝ LLaMA Prompt WriterOwned by: ChatGPT OrchestratorLast Updated: 2025-04-23
+

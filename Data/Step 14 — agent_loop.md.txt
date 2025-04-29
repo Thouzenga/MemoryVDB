@@ -1,0 +1,133 @@
+🧠 Memory VDB — Step 14: Agent Memory Loop
+-----------------------------------------------------
+Enables autonomous reflection, memory updates, and maintenance without user intervention.
+
+Purpose:
+- Observe system state
+- Query and reflect on past actions
+- Trigger bop_runner.py + semantic_diff.py to evolve memory
+- Self-evolve modular memory safely
+
+Built-in Safeguards:
+✅ All memory updates pass through diff check
+✅ No direct overwrite or deletion allowed
+✅ Cooldown on task and memory reflections
+✅ Logs every agent decision
+✅ Semantic reroute approval (new)
+
+"""
+
+import os
+import json
+from datetime import datetime
+from filelock import FileLock
+from semantic_diff import semantic_diff
+
+# --- Config
+REFLECTION_HISTORY_PATH = "logs/agent_reflection_log.json"
+MAX_RECENT_HASHES = 10
+
+# --- Load reflection history
+def load_recent_hashes():
+    if not os.path.exists(REFLECTION_HISTORY_PATH):
+        return []
+    with open(REFLECTION_HISTORY_PATH) as f:
+        return json.load(f)
+
+# --- Save a new input hash to history
+def save_recent_hash(hash_val):
+    history = load_recent_hashes()
+    history.append({
+        "timestamp": datetime.now().isoformat(),
+        "input_hash": hash_val
+    })
+    if len(history) > MAX_RECENT_HASHES:
+        history = history[-MAX_RECENT_HASHES:]
+    with open(REFLECTION_HISTORY_PATH, "w") as f:
+        json.dump(history, f, indent=2)
+
+# --- Determine if reflection should proceed
+def should_reflect(new_input_hash):
+    history = load_recent_hashes()
+    seen_hashes = {entry["input_hash"] for entry in history}
+    if new_input_hash in seen_hashes:
+        print(f"⏩ Skipping reflection — input already recently processed.")
+        return False
+    return True
+
+# --- Placeholder reflection runner
+def reflect_on_recent(current_input_hash):
+    if should_reflect(current_input_hash):
+        print(f"🧠 Running reflection for new memory chunk...")
+        # --- Trigger reflection logic here (query, summarize, update memory)
+        save_recent_hash(current_input_hash)
+    else:
+        print(f"🔁 Reflection skipped due to cooldown.")
+
+# --- Validate rerouted memory before commit (NEW)
+def safe_reroute(candidate_entry, target_memory_file, changelog_entries):
+    """
+    Use semantic diff to validate rerouted memory before committing move.
+    """
+    diff_result = semantic_diff(candidate_entry, changelog_entries)
+
+    if diff_result["action"] == "skip":
+        print(f"⏩ Reroute skipped — semantic diff deemed redundant.")
+        return False
+
+    print(f"✅ Proceeding with reroute ({diff_result['action']})...")
+    return True
+
+# --- Example placeholder for reroute logic (NEW)
+def reroute_memory(candidate_entry, target_file):
+    print(f"🗂️ Attempting memory reroute...")
+    changelog_entries = load_changelog_for(target_file)
+
+    if safe_reroute(candidate_entry, target_file, changelog_entries):
+        commit_memory_update(candidate_entry, target_file)
+
+# --- Agent loop runner
+def run_agent_loop(dry_run=False, mode="all"):
+    print("🤖 Memory VDB Agent Loop Activated...")
+
+    # Example placeholder — loop over queued tasks, stale memory, etc.
+    current_input_hash = load_latest_input_hash()
+
+    if mode in ["all", "reflect"]:
+        reflect_on_recent(current_input_hash)
+
+    if mode in ["all", "reroute"]:
+        dummy_entry = {"summary": "example", "tags": ["test"], "content": "example reroute"}
+        reroute_memory(dummy_entry, "Meta/Example.txt")
+
+# --- Helper to get latest llama input hash
+def load_latest_input_hash():
+    if not os.path.exists("llama/output.json"):
+        return "UNKNOWN"
+    with open("llama/output.json") as f:
+        data = json.load(f)
+    return data.get("input_hash", "UNKNOWN")
+
+# --- Helper to load past changelog for target file
+def load_changelog_for(file_path):
+    if not os.path.exists("memory_changelog.json"):
+        return []
+    with open("memory_changelog.json") as f:
+        all_entries = json.load(f)
+    return [entry for entry in all_entries if entry.get("file") == file_path]
+
+# --- Dummy memory writer (placeholder)
+def commit_memory_update(entry, target_file):
+    print(f"✅ [DUMMY] Would update memory file: {target_file}")
+    # In real pipeline, this would trigger Save Manager or ingest pipeline
+
+if __name__ == "__main__":
+    run_agent_loop(dry_run=False, mode="all")
+
+📦 Output Files
+
+| File | Purpose |
+|------|---------|
+| agent_log.json | Full agent operation logs |
+| agent_reflection_log.json | Reflection cooldown tracker (input_hash) |
+| memory_changelog.json | Memory diffs logged here |

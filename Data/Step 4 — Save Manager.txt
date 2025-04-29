@@ -1,0 +1,177 @@
+🧩 Step 4 — Save Manager Executes LLaMA's Decision
+
+🎯 Purpose
+
+To act on LLaMA's output by performing a save operation: append, replace, archive, or skip.
+This ensures memory evolves cleanly and file structure remains organized, readable, and ingestible.
+
+🛠 Workflow
+
+Read structured decision from llama/output.json
+
+Parse the action, file, content, and metadata
+
+Perform correct write logic to target memory file
+
+Write to:
+
+Data/ (live memory zone)
+
+Archive/ (if applicable)
+
+Log every update to:
+
+memory_changelog.json
+
+Meta/[filename]_log.json (per-file log)
+
+Enqueue file for ingestion via ingest_queue.json (⚡ New as of Step 15)
+
+(Ingestion happens later asynchronously)
+
+✅ Action Types (Defined)
+
+append → Add content to an existing memory file
+
+replace → Overwrite an existing file with new content
+
+archive → Move existing file to /Archive/, write update to live zone
+
+skip → Do nothing (but still log intent)
+
+⚠️ Failure Modes + Fixes
+
+❌ File or Folder Missing
+🔧 Auto-create nested folders with os.makedirs(..., exist_ok=True)
+🔧 Log any skipped writes due to path errors
+
+❌ Illegal Characters
+🔧 Sanitize filenames: replace <>:"/|?* with -
+🔧 Normalize to lowercase slug (e.g., ai_architecture.txt)
+
+❌ Encoding or Write Errors
+🔧 UTF-8 enforced
+🔧 Try/except wrap all writes
+
+❌ Archive Not Ingested
+🔧 Log archive to archive_log.json
+🔧 Schedule for reindex or ignore based on rules
+
+🗂 File Structure Example
+
+swift
+Copy
+Edit
+/Data/
+├── Meta/
+│   └── AI_Architecture.txt
+├── Core/
+│   └── Universal_Rules.txt
+├── Archive/
+│   └── Old_Core_Logic_2024.txt
+📝 Sample llama/output.json
+
+json
+Copy
+Edit
+{
+  "action": "append",
+  "file": "Meta/AI_Architecture.txt",
+  "content": "We confirmed LLaMA now manages all summarization and tagging...",
+  "timestamp": "2025-04-23T12:45:00Z",
+  "summary": "LLaMA executes step 3 in the flow...",
+  "tags": ["llama", "save", "vdb"],
+  "chat_name": "GPT Memory Build",
+  "message_id": "msg_472-20",
+  "input_hash": "a6f32..."
+}
+🔧 save_manager.py (Core Logic Summary)
+
+python
+Copy
+Edit
+import os, json, re
+from datetime import datetime
+
+# --- Load memory
+with open("llama/output.json") as f:
+    memory = json.load(f)
+
+# --- Path Sanitizer
+unsafe_chars = r'[<>:"/\\|?*]'
+safe_file = re.sub(unsafe_chars, '-', memory["file"]).strip()
+safe_file = os.path.normpath(safe_file)
+if safe_file.startswith("..") or ".." in safe_file or os.path.isabs(safe_file):
+    raise ValueError(f"❌ Unsafe path detected: {safe_file}")
+memory["file"] = safe_file
+
+file_path = os.path.join("Data", memory["file"])
+folder = os.path.dirname(file_path)
+os.makedirs(folder, exist_ok=True)
+
+# --- Save based on action
+if memory["action"] == "append":
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write("\n\n" + memory["content"])
+elif memory["action"] == "replace":
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(memory["content"])
+elif memory["action"] == "archive":
+    archive_path = os.path.join("Data", "Archive", os.path.basename(file_path))
+    with open(archive_path, "w", encoding="utf-8") as f:
+        f.write(memory["content"])
+
+# --- Log to master changelog
+log_entry = {
+    "file": memory["file"],
+    "action": memory["action"],
+    "timestamp": memory.get("timestamp"),
+    "source": memory.get("source", "bop"),
+    "chat_name": memory.get("chat_name"),
+    "message_id": memory.get("message_id"),
+    "input_hash": memory.get("input_hash"),
+    "tags": memory.get("tags", [])
+}
+
+with open("memory_changelog.json", "a", encoding="utf-8") as log:
+    log.write(json.dumps(log_entry) + "\n")
+
+# --- Log to per-file changelog
+log_file = memory["file"].replace(".txt", "_log.json").replace("/", "_")
+with open(log_file, "a", encoding="utf-8") as per_file_log:
+    per_file_log.write(json.dumps(log_entry) + "\n")
+
+# --- Enqueue ingestion
+task = {
+    "file": os.path.join("Data", memory["file"]),
+    "zone": memory["file"].split("/")[0],
+    "chat_name": memory.get("chat_name", "UNKNOWN_CHAT"),
+    "message_id": memory.get("message_id", "UNKNOWN_MSG"),
+    "input_hash": memory.get("input_hash", "UNKNOWN_HASH"),
+    "tags": memory.get("tags", [])
+}
+
+if os.path.exists("ingest_queue.json"):
+    with open("ingest_queue.json") as f:
+        queue = json.load(f)
+else:
+    queue = []
+
+queue.append(task)
+with open("ingest_queue.json", "w") as f:
+    json.dump(queue, f, indent=2)
+
+print(f"🧠 Enqueued ingestion for {task['file']}")
+🧠 Optional Enhancements
+
+Add semantic diff safety on append
+
+Link changelog entries to triggering GPT message
+
+Auto-create missing folders from paths.json
+
+Auto-clean empty files or malformed writes
+
+📌 Module: Step 4 — Save Manager
+Controller: save_manager.py
+Last Updated: 2025-04-28 (Post Ingest-Queue Patch)

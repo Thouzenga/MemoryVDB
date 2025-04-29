@@ -1,0 +1,231 @@
+🧩 Step 5 — Drive Sync Logic
+
+🎯 Purpose
+
+To sync updated memory files from the local system (/Data/) to a Google Drive folder (/Drive/MemoryVDB/) after LLaMA and Save Manager complete an action.
+
+This enables:
+
+Persistent versioned backups  
+Cloud-accessible memory  
+Foundation for remote FAISS index in the future  
+
+✅ Summary of What This Step Does
+
+Triggers:  
+After save_manager.py appends, replaces, or archives a file.
+
+Core Actions:  
+- Resolve the full path to the local file (from paths.json)  
+- Determine where on Drive it should go (based on folder structure rules)  
+- Upload the file via drive_upload() function  
+- Log the outcome (success/fail) in upload_log.json  
+- NEVER overwrite — only update if it’s a meaningful change  
+
+📦 Key Files + Configs (Design Locked)
+
+1. paths.json  
+Modular router for all paths in the system:
+
+```json
+{
+  "local_data_dir": "Data/",
+  "llama_input_path": "llama/input.txt",
+  "llama_output_path": "llama/output.json",
+  "memory_changelog": "memory_changelog.json",
+  "upload_log": "upload_log.json",
+  "archive_log": "archive_log.json",
+  "drive_root": "Drive/MemoryVDB/"
+}
+upload_log.json (initial scaffold) Logs every attempt to sync a file to Drive.
+
+Expected entry format:
+
+json
+Copy
+Edit
+{
+  "timestamp": "2025-04-23T14:00:00Z",
+  "file": "Meta/AI_Architecture.txt",
+  "status": "success",
+  "attempts": 1,
+  "context_tags": ["llama", "ai", "architecture"],
+  "chat_name": "GPT Memory Build",
+  "notes": "Uploaded cleanly after append"
+}
+archive_log.json (initial scaffold) Tracks every time a memory file is archived (for traceability + recovery).
+
+Expected entry format:
+
+json
+Copy
+Edit
+{
+  "timestamp": "2025-04-23T14:02:00Z",
+  "file": "Meta/AI_Architecture.txt",
+  "archived_as": "Meta/Archive/AI_Architecture_2025-04-23T14-02-00Z.txt",
+  "input_hash": "abc123...",
+  "reason": "File replaced due to new summary with semantic value"
+}
+⚙️ Function Contract — drive_upload()
+
+Proposed function:
+
+python
+Copy
+Edit
+from datetime import datetime
+import json
+import os
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from filelock import FileLock
+
+def drive_upload(local_file_path: str, metadata: dict) -> dict:
+    """
+    Uploads a local memory file to Google Drive based on paths.json routing.
+
+    Returns:
+        {
+            "status": "success" or "fail",
+            "attempts": int,
+            "drive_path": str,
+            "notes": str
+        }
+    """
+
+    # --- Safety Check: Validate drive token presence
+    token_path = "drive_token.json"
+    if not os.path.exists(token_path):
+        print("⚠️ Google Drive token missing. Skipping upload.")
+        with open("logs/upload_log.json", "a", encoding="utf-8") as log:
+            log.write(json.dumps({
+                "timestamp": datetime.now().isoformat(),
+                "status": "token_missing",
+                "file": metadata.get("file", "UNKNOWN")
+            }) + "\n")
+        return {
+            "status": "fail",
+            "attempts": 0,
+            "drive_path": None,
+            "notes": "Drive token missing"
+        }
+
+    try:
+        # --- Authenticate Drive session
+        gauth = GoogleAuth()
+        gauth.LoadCredentialsFile(token_path)
+
+        if gauth.credentials is None:
+            gauth.LocalWebserverAuth()
+        elif gauth.access_token_expired:
+            gauth.Refresh()
+        else:
+            gauth.Authorize()
+
+        drive = GoogleDrive(gauth)
+
+        # --- Prepare upload
+        drive_root = "Drive/MemoryVDB/"
+        relative_path = os.path.relpath(local_file_path, "Data").replace("\\", "/")
+        drive_folder_path = os.path.dirname(relative_path)
+        drive_file_name = os.path.basename(relative_path)
+
+        # --- Upload with retry
+        success = False
+        attempts = 0
+        last_error = None
+
+        while attempts < 3 and not success:
+            try:
+                file_drive = drive.CreateFile({
+                    'title': drive_file_name,
+                    'parents': [{"id": drive_root}]
+                })
+                file_drive.SetContentFile(local_file_path)
+                file_drive.Upload()
+                success = True
+            except Exception as e:
+                attempts += 1
+                last_error = e
+                print(f"⚠️ Upload attempt {attempts} failed: {e}")
+
+        # --- Log Result
+        if success:
+            with open("logs/upload_log.json", "a", encoding="utf-8") as log:
+                log.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "file": metadata.get("file", local_file_path),
+                    "status": "success",
+                    "attempts": attempts,
+                    "context_tags": metadata.get("tags", []),
+                    "chat_name": metadata.get("chat_name", "UNKNOWN"),
+                    "notes": "Uploaded successfully"
+                }) + "\n")
+
+            return {
+                "status": "success",
+                "attempts": attempts,
+                "drive_path": drive_file_name,
+                "notes": "Uploaded successfully"
+            }
+
+        else:
+            with open("logs/upload_log.json", "a", encoding="utf-8") as log:
+                log.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "file": metadata.get("file", local_file_path),
+                    "status": "fail",
+                    "attempts": attempts,
+                    "context_tags": metadata.get("tags", []),
+                    "chat_name": metadata.get("chat_name", "UNKNOWN"),
+                    "notes": str(last_error)
+                }) + "\n")
+
+            return {
+                "status": "fail",
+                "attempts": attempts,
+                "drive_path": None,
+                "notes": str(last_error)
+            }
+
+    except Exception as e:
+        print(f"❌ Drive upload completely failed: {e}")
+        with open("logs/upload_log.json", "a", encoding="utf-8") as log:
+            log.write(json.dumps({
+                "timestamp": datetime.now().isoformat(),
+                "file": metadata.get("file", local_file_path),
+                "status": "fail",
+                "attempts": 1,
+                "context_tags": metadata.get("tags", []),
+                "chat_name": metadata.get("chat_name", "UNKNOWN"),
+                "notes": str(e)
+            }) + "\n")
+
+        return {
+            "status": "fail",
+            "attempts": 1,
+            "drive_path": None,
+            "notes": str(e)
+        }
+🛡️ Rules + Fail Safes (Built Into Design)
+
+❌ Never overwrite blindly — no destructive updates
+✅ Only upload files modified in this bop flow
+✅ Use paths.json for everything — no hardcoded folders
+✅ Retry uploads up to 3x before fail (manual expansion available)
+✅ Every upload gets logged — success or failure
+✅ Archives are stored in Data/Archive/[zone]/[timestamped_file]
+
+📂 Folder Structure on Drive
+
+Drive will mirror the local Data/ structure:
+
+Local File Drive Destination Data/Core/Rules.txt Drive/MemoryVDB/Core/Rules.txt Data/Meta/AI_Architecture.txt Drive/MemoryVDB/Meta/AI_Architecture.txt Data/Archive/... Drive/MemoryVDB/Archive/...
+
+🧪 Optional Tests to Run (when we build)
+
+✅ Upload a file after append
+✅ Trigger a replace that archives old version
+✅ Log a failed upload (mock API fail)
+✅ Try to upload a duplicate (ensure it’s skipped)

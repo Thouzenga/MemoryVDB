@@ -1,0 +1,241 @@
+🧠 Memory VDB System Specification — v1.1 (Upgraded)
+
+🌟 Purpose
+
+The Memory VDB is a persistent, modular, and self-evolving long-term memory system designed for AI agents. It allows ChatGPT to:
+
+Summarize and store memory from past conversations or tasks
+
+Maintain organized, topic-specific knowledge files
+
+Query past insights contextually
+
+Evolve memory through intelligent updates, tagging, and archiving
+
+It integrates local processing via LLaMA 3 (Ollama), structured file storage via Google Drive, and local FAISS-based vector search via the VDB Template.
+
+⚙️ Version 1.1 Enhancements
+
+✅ Key Fixes and Additions
+
+Replaced fragile JSON regex with structured json.loads() scan
+
+Added deduplication logic via input_hash.json
+
+Introduced paths.json for modular path configuration
+
+Enabled traceability with chat_name, message_id, and input_hash
+
+Optional: semantic diff stub for append verification
+
+Optional: token limit estimator before LLaMA processing
+
+Introduced test harness plan and changelog per file/day
+
+🧱 System Architecture Overview
+
+ChatGPT = Orchestrator (command interface, optional)LLaMA 3 via Ollama = Local summarizer, classifier, diff enginePython Script Layer = Executes file operations and indexingGoogle Drive = Source-of-truth file store (versioned .txt memory)VDB Template = FAISS vector database engine
+
+Each memory zone is isolated in its own folder (/Master Memory, /Projects, /Life, etc.) based on the VDB Template structure.
+
+🧹 Core Components
+
+ChatGPT (Optional UI/Orchestrator)
+
+Triggers commands like bop, vdb:query, vdb:archive
+
+Selects memory-worthy content (based on rules or checkpoints)
+
+Orchestrates flow, but not required for all execution
+
+LLaMA 3 (via Ollama)
+
+Summarizes raw text
+
+Tags entities, topics, system references
+
+Performs semantic diff (if provided memory context)
+
+Returns structured JSON (summary, tags, timestamp, action)
+
+Google Drive
+
+Stores finalized .txt memory files
+
+Drive folder acts as versioned, auditable memory archive
+
+VDB Template
+
+ingest.py, query.py, vector_tools.py
+
+Splits documents, embeds via OpenAI, stores vectors in FAISS index
+
+Supports local CLI or Flask-based querying
+
+Python Script Layer
+
+Executes save_manager.py to apply LLaMA decisions
+
+Manages file actions (append, replace, archive, upload)
+
+Triggers ingestion scripts and changelogs
+
+➶ End-to-End Flow — bop Command
+
+Trigger: ChatGPT receives bop command or checkpoint pattern
+
+Selection: GPT extracts relevant messages (within token limit)
+
+Hashing: GPT creates SHA256 hash of the memory block
+
+Deduplication Check: If hash exists in input_hash.json, skip
+
+Chunking: GPT truncates to ~3000 tokens
+
+Metadata: Adds chat_name, message_id, timestamp to metadata
+
+Write Input: llama/input.txt is created from template_path
+
+Execution: Shell wrapper runs ollama run llama3 < input.txt > raw_output.txt
+
+Postprocessing: Extracted JSON saved to llama/output.json
+
+Save Action: save_manager.py modifies the correct .txt file
+
+Upload: Final file posted to Drive
+
+Ingest: ingest.py updates FAISS index
+
+🛡️ Failure Points + Safeguards
+
+🧹 Step 1: bop Trigger
+
+✅ Token limit safeguard
+
+✅ Deduplication via input_hash.json
+
+✅ GPT chunk hash generation
+
+🧹 Step 2: GPT Input Writer
+
+✅ Path validation using paths.json
+
+✅ Sanitizer for markdown/quotes
+
+✅ Fallback template injection
+
+🧹 Step 3: LLaMA Execution
+
+✅ Structured JSON enforced line-by-line
+
+✅ Validates required fields (summary, tags, etc.)
+
+🧹 Step 4: Save Manager
+
+✅ Append/replace logic based on LLaMA decision
+
+✅ Hash check before file mutation
+
+✅ Dual logging (per file + global)
+
+🧹 Step 5: Upload
+
+✅ Retry logic on Drive error
+
+✅ Log all attempts in upload_log.json
+
+🧹 Step 6: Ingest
+
+✅ CLI watcher or auto-triggered
+
+✅ Validate OpenAI key/token thresholds
+
+📁 Memory Structure + Evolution Strategy
+
+Memory Zones:
+
+/Core/, /Projects/, /Meta/, /Life/, /Ideas/, /Tech/, /Archive/
+
+Memory Classes:
+
+core, supporting, archivable
+
+Commands:
+
+vdb:review [file], vdb:append [file], vdb:replace [file], vdb:archive [file], vdb:promote [file]
+
+🔍 LLaMA + Script-Based Division of Labor
+
+Role
+
+ChatGPT
+
+LLaMA
+
+Python
+
+Chunk Input
+
+✅
+
+❌
+
+❌
+
+Summarize
+
+❌
+
+✅
+
+❌
+
+Tag
+
+❌
+
+✅
+
+❌
+
+Save Logic
+
+✅ (orchestrate)
+
+✅ (decide)
+
+✅ (execute)
+
+Semantic Diff
+
+✅
+
+✅ (if prompted)
+
+✅ (file diff)
+
+🧠 Self-Evolving Logic
+
+ChatGPT parses past convos, triggers bop
+
+Dedup check prevents wasted LLaMA calls
+
+Metadata enriches memory traceability
+
+Changelogs per file and daily summaries for observability
+
+🧪 Optional (but implemented) Enhancements
+
+paths.json for clean routing
+
+input_hash.json for deduplication
+
+Token counter for chunk size limit
+
+Semantic diff planning for future overwrite detection
+
+Test folder placeholder for Steps 2–4 validation
+
+Last Updated: 2025-04-23 — v1.1 hardened upgrade
+Architect: ChatGPT + [User]
+

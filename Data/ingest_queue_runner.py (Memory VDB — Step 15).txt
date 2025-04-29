@@ -1,0 +1,85 @@
+🧠 MEMORY VDB — STEP 15: INGEST_QUEUE_RUNNER.PY
+─────────────────────────────────────────────
+❓ PURPOSE
+Handles ingestion of memory files into FAISS vector database asynchronously, after memory save.
+
+Eliminates direct ingestion during save flow (save_manager.py) — allows for queued, background ingestion with retries.
+
+─────────────────────────────────────────────
+🔗 SYSTEM POSITION
+- Triggered after save_manager.py enqueues a new ingestion task
+- Reads from ingest_queue.json
+- Updates memory_changelog.json and ingest_hash.json
+- Protects FAISS index consistency via .lock files
+
+─────────────────────────────────────────────
+📥 INPUTS
+
+- ingest_queue.json → List of pending ingestion tasks
+- Data/[Zone]/[File].txt → Memory text files to embed
+- paths.json → Maps zones to FAISS index locations
+- ingest_hash.json → Tracks embedded chunk hashes to prevent duplicates
+
+─────────────────────────────────────────────
+📤 OUTPUTS
+
+- New vectors written into FAISS indexes
+- Memory chunks logged to memory_changelog.json
+- Updated ingest_hash.json with newly ingested chunks
+- Cleared successful tasks from ingest_queue.json
+
+─────────────────────────────────────────────
+🛠️ CORE LOGIC
+
+✅ Load queue from ingest_queue.json  
+✅ For each task:
+- Load the file from Data/
+- Split into ~500-token chunks (via split_text)
+- Check each chunk against ingest_hash.json for dedup
+- Embed new chunks using embed_text
+- Lock the FAISS index (FileLock) and write new vectors via write_to_faiss
+- Update ingest_hash.json with ingested chunk hashes
+- Log ingestion action to memory_changelog.json
+
+✅ Remove successful tasks from queue  
+✅ Retry failed tasks in next run
+
+─────────────────────────────────────────────
+🔐 FAILSAFES
+
+✅ Deduplication via SHA256 chunk hashes  
+✅ File existence checks before ingestion  
+✅ Index write locking (.lock files) to prevent race conditions  
+✅ No double-ingesting known chunks  
+✅ All actions timestamped for audit trail
+
+─────────────────────────────────────────────
+📂 FILES USED
+
+- ingest_queue.json
+- ingest_hash.json
+- memory_changelog.json
+- VDB_Templates/[Zone].index
+- Data/[Zone]/[File].txt
+- paths.json
+
+─────────────────────────────────────────────
+🔁 FUTURE UPGRADE PATHS
+
+🧠 Priority Queues → Allow urgent memory ingestion first  
+🧠 Background Worker → Auto-run queue processing every N minutes  
+🧠 Parallel Ingestion → Handle multiple files concurrently with queue locks  
+🧠 Semantic Verification → Confirm chunk quality post-ingestion
+
+─────────────────────────────────────────────
+📌 MODULE SIGNATURE
+
+- Architect: ChatGPT (Gina) + [User]
+- Module: Step 15 — Auto-Ingestion Queue
+- Controller: ingest_queue_runner.py
+- Version: v1.0
+- Last Updated: 2025-04-28
+- File Type: Informational spec (for AI memory + backend reconstruction)
+
+─────────────────────────────────────────────
+✅ Step 15 is now fully specified and documented.

@@ -1,0 +1,105 @@
+📄 Step 13 — scheduler.md.txt (Finalized V1.0)
+markdown
+Copy
+Edit
+🧠 MEMORY VDB — STEP 13: SCHEDULER.PY
+─────────────────────────────────────────
+❓ PURPOSE
+The scheduler automates periodic system maintenance:
+- Retries failed tasks
+- Ingests new memory files
+- Pushes uploads
+- Monitors task health
+
+It enables fully autonomous operation — the memory engine evolves and maintains itself without manual intervention.
+
+─────────────────────────────────────────
+🔗 SYSTEM POSITION
+
+Scheduler is an **orchestration layer** for:
+- Step 6: Ingest (`ingest.py`)
+- Step 5: Uploads (`drive_upload`)
+- Step 8: Retry logic (`retry_runner.py`)
+- Step 10: Watchdog (`watchdog.py`)
+
+It doesn’t create new logic — it runs existing scripts on a schedule or trigger.
+
+─────────────────────────────────────────
+📥 INPUTS
+
+- `paths.json` → Source of memory and index folders
+- `task_queue.json` → Tracks all pipeline steps + failures
+- `ingest_hash.json` → Dedupes vector memory chunks
+- `upload_log.json` → Tracks Drive upload status
+- `watchdog_state.json` → Summarizes task health
+
+Optional CLI flag: `--mode`
+
+─────────────────────────────────────────
+📤 OUTPUTS
+
+- Triggers existing scripts
+- Logs status to `scheduler_log.json`
+- Console summary: what was run, what was skipped, what failed
+
+─────────────────────────────────────────
+🧠 MODES (CLI FLAGS)
+
+| Mode         | Description                        |
+|--------------|------------------------------------|
+| `--mode all` | Runs all subsystems                |
+| `--mode retry` | Calls `retry_runner.py`          |
+| `--mode ingest` | Scans Data folder for unindexed `.txt` files |
+| `--mode upload` | Scans for failed or skipped uploads |
+| `--mode watchdog` | Runs `watchdog.py` health check |
+
+─────────────────────────────────────────
+🔐 SAFETY + FAILSAFES
+
+✅ `.lock` files per task (`scheduler.lock`) prevent conflict  
+✅ Logs every run to `scheduler_log.json`  
+✅ No destructive changes — only reuses confirmed retry, ingest, or upload logic  
+✅ Uses same logic and paths as Steps 5–10  
+✅ Can be run manually or on a timer (e.g. cron)
+
+─────────────────────────────────────────
+🧩 COMPONENTS IT CALLS
+
+- `retry_runner.py`
+- `watchdog.py`
+- `ingest.py`
+- `drive_upload()` (via save manager or upload queue)
+- `paths.json`
+- `task_queue.json`
+- `upload_log.json`
+- `ingest_hash.json`
+
+─────────────────────────────────────────
+🔁 FUTURE EXTENSIONS
+
+🧠 Background cron loop  
+→ Run `scheduler.py` every 10–30 mins for real-time system health
+
+🧠 `task_queue_watcher.py`  
+→ Passive file monitor that triggers scheduler when task queue changes
+
+🧠 Auto-push to vector index after append  
+→ Skip delay between save + FAISS update
+
+🧠 Self-healing retries with confidence ranking  
+→ Prioritize tasks based on criticality or system role
+
+─────────────────────────────────────────
+🏗️ BUILD STATUS
+
+- All components exist
+- Scheduler only needs glue logic + execution control
+- Safe to implement immediately (no destructive writes)
+
+─────────────────────────────────────────
+📌 DESIGN SIGNATURE
+
+Architect: ChatGPT (Gina) + [User]  
+Version: V1.0 (Automated Maintenance Layer)  
+Last Updated: 2025-04-24  
+File Type: Informational spec (for AI memory + backend reconstruction)

@@ -1,0 +1,44 @@
+"""
+🧠 Memory VDB — Step 9.1: Memory Optimizer
+------------------------------------------
+Optimizes a newly saved memory file after Save Manager.
+
+Functions:
+- Deduplicate identical lines
+- Normalize memory format
+- Prepare for FAISS ingestion
+
+Future upgrades:
+- Semantic enrichment
+- Metadata tagging
+- Intelligent compression
+"""
+
+import os
+
+def optimize_memory(file_path):
+    """
+    Optimizes a newly saved memory file:
+    - Deduplicates exact lines
+    - Normalizes for ingestion
+    - Prepares memory for searchability
+    """
+    if not os.path.exists(file_path):
+        print(f"⚠️ File does not exist for optimization: {file_path}")
+        return
+
+    try:
+        # --- Basic deduplication: remove duplicate lines
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        unique_lines = list(dict.fromkeys(line.strip() for line in lines if line.strip()))
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            for line in unique_lines:
+                f.write(line + "\n")
+
+        print(f"✅ Memory optimized: {file_path}")
+
+    except Exception as e:
+        print(f"❌ Memory optimization failed for {file_path}: {e}")

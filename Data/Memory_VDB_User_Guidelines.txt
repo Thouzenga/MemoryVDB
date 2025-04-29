@@ -1,0 +1,92 @@
+📁 Memory VDB — User Goals, Requirements, and Preferences (v1.0)
+
+Owner: [You]
+System: Memory VDB — A self-evolving AI memory engine using GPT, LLaMA, and FAISS
+
+--------------------------------------------------------
+🎯 PRIMARY GOALS
+--------------------------------------------------------
+
+- Build a durable, token-efficient long-term memory system that:
+  - Stores, reflects on, and evolves memory over time
+  - Is modular and local-first (GPT as orchestrator, LLaMA for local parsing)
+  - Requires zero manual file naming or folder organization
+
+- Enable the AI to:
+  - Know what it knows
+  - Update memory intelligently
+  - Never forget past logic
+  - Avoid redundant or corrupted memory
+
+- Eventually create a system that can:
+  - Parse all past conversations
+  - Generate memory structures on the fly
+  - Reflect on memory contextually before answering or acting
+
+--------------------------------------------------------
+🧱 SYSTEM REQUIREMENTS
+--------------------------------------------------------
+
+✅ Memory is cumulative and additive — no destructive overwrites
+✅ Smart deduplication — skip truly identical info, but include new context/POV
+✅ All changes are logged (memory_changelog.json + per-file logs)
+✅ Modular file structure — all paths managed via `paths.json`
+✅ Deduplication handled by `input_hash.json` (pre-LLaMA) and `ingest_hash.json` (pre-FAISS)
+✅ Archive all previous versions before replacing
+✅ Retry failed operations with DAG logic using `task_queue.json`
+
+--------------------------------------------------------
+🛠️ PREFERENCES FOR ALL SCRIPTS & FLOWS
+--------------------------------------------------------
+
+⚙️ **Modularity First**
+- All components should be swappable or testable in isolation
+- No hardcoded paths — everything uses `paths.json`
+
+💾 **File Safety**
+- Never overwrite existing memory unless archive and diff are handled
+- Use `archive_log.json` and per-file timestamped backups
+
+🔁 **Test Mode / Mock Runs**
+- Scripts should support `--test_run` or `--dry_run`
+- Test runs must not write memory or upload files
+- Test runs should still log what *would* have happened
+
+📋 **Logging**
+- Print a summary at the end: success/fail, what happened, suggestions if something failed
+- Don’t print every step unless debugging
+- Always log task attempts (even test ones) in `task_queue.json`
+
+🧪 **Validation & Safety**
+- All LLaMA outputs must be schema-validated before saving
+- Deduplication must occur BEFORE any write or upload
+- Task failure must never go unlogged
+
+--------------------------------------------------------
+📡 BOT INTEGRATION STYLE
+--------------------------------------------------------
+
+- Don’t ask vague or open-ended questions
+- No rehashing unless context is lost
+- Give clear checkpoints and options
+- Always highlight risks or pending decisions
+- Minimize token use where possible (no fluff)
+- Treat every task like a modular component
+- Summarize plans before building
+- Output should be copy/paste ready
+
+--------------------------------------------------------
+🔜 FUTURE FEATURES TO SUPPORT
+--------------------------------------------------------
+
+- Smart memory diffing (semantic)
+- Agent memory awareness and reflection
+- Full query support for GPT to search and reference memory
+- Background scheduling for retry/ingest
+- Self-updating summaries based on memory file changes
+
+--------------------------------------------------------
+🧠 MEMORY VDB — CONTEXT PASSPHRASE
+Use this when beginning a new session:
+
+“Continue building the Memory VDB system. I have uploaded your backend files. You already know my goals and preferences.”

@@ -1,0 +1,104 @@
+[
+  {
+    "wave": "Wave 1",
+    "date": "2025-04-25",
+    "patches": [
+      {
+        "patch": "Fix BOP Runner Duplicate Fields and LLaMA Output Validation",
+        "files": ["bop_runner.py"],
+        "summary": "Corrected redundant fields and output validation logic after LLaMA processing. (Step 9)"
+      },
+      {
+        "patch": "Fix Save Manager Logging and Archive Safety",
+        "files": ["save_manager.py"],
+        "summary": "Improved log integrity and safe archiving of memory writes. (Step 4)"
+      },
+      {
+        "patch": "Fix LLaMA Execution Safety and Auto Model Pull",
+        "files": ["llama_wrapper.sh", "llama_postprocess.py"],
+        "summary": "Added validation for LLaMA execution and automatic model downloads. (Step 3)"
+      },
+      {
+        "patch": "Fix Drive Sync to Log Chat Name with Uploads",
+        "files": ["drive_upload.py"],
+        "summary": "Ensured chat_name is logged during Drive uploads for traceability. (Step 5)"
+      },
+      {
+        "patch": "Fix FAISS Ingestion to Log Metadata",
+        "files": ["ingest.py", "ingest_hash.json"],
+        "summary": "Improved FAISS ingestion tracking with metadata logging. (Step 6)"
+      },
+      {
+        "patch": "Fix Semantic Diff Fallback and Reroute Logic",
+        "files": ["semantic_diff.py"],
+        "summary": "Added fallback strategies and future-safe reroute paths. (Step 11)"
+      },
+      {
+        "patch": "Add Watchdog Timeout and Stale Queue Handling",
+        "files": ["watchdog.py"],
+        "summary": "Enabled task timeout handling and stale retry cleanup. (Step 10)"
+      },
+      {
+        "patch": "Add Retry Runner Cooldown and Retry Logging",
+        "files": ["retry_runner.py"],
+        "summary": "Implemented cooldowns and enhanced retry attempt logging. (Step 8)"
+      },
+      {
+        "patch": "Add Agent Loop Reflection Cooldown Using Input Hash",
+        "files": ["agent_loop.py"],
+        "summary": "Prevented agent reflection spamming by using input hash cooldowns. (Step 14)"
+      },
+      {
+        "patch": "Add Agent Loop Semantic Diff Check Before Reroutes",
+        "files": ["agent_loop.py"],
+        "summary": "Verified semantic_diff before rerouting memory operations. (Step 14)"
+      },
+      {
+        "patch": "Add Query Caching for Vector Search Deduplication",
+        "files": ["memory_query.py"],
+        "summary": "Added vector search query caching to prevent redundant searches. (Step 12)"
+      },
+      {
+        "patch": "Add Embedding Backend Switch (OpenAI / LLaMA)",
+        "files": ["vector_tools.py", "paths.json"],
+        "summary": "Enabled runtime embedding backend switching between OpenAI and LLaMA."
+      }
+    ]
+  },
+  {
+    "wave": "Wave 2",
+    "date": "2025-04-28",
+    "patches": [
+      {
+        "patch": "Drive Upload Full Implementation",
+        "files": ["drive_upload.py"],
+        "summary": "Real Drive backup logic with robust fallback and structured upload logging."
+      },
+      {
+        "patch": "Ollama Installation and Llama3 Model Preflight Check",
+        "files": ["bop_runner.py"],
+        "summary": "Pre-run validation ensuring Ollama installed and llama3 model available."
+      },
+      {
+        "patch": "LLaMA Output JSON Schema Validation",
+        "files": ["bop_runner.py"],
+        "summary": "Full strict JSON schema checking for LLaMA memory output before saving."
+      },
+      {
+        "patch": "Environment Files Preflight Checks",
+        "files": ["bop_runner.py"],
+        "summary": "Soft validation ensuring presence of drive_token.json and .env placeholder files."
+      },
+      {
+        "patch": "Memory Optimizer Auto-Run After Memory Save",
+        "files": ["memory_optimizer.py", "bop_runner.py"],
+        "summary": "Connected memory_optimizer to run immediately after successful memory save."
+      },
+      {
+        "patch": "Input Hash Garbage Collection on Size Limit",
+        "files": ["bop_runner.py"],
+        "summary": "Automatic pruning of input_hash.json when over 500 entries to prevent bloat."
+      }
+    ]
+  }
+]

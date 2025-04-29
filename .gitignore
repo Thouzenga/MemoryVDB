@@ -1,0 +1,7 @@
+# Don't track environment or keys
+venv/
+.env
+__pycache__/
+*.pyc
+*.pkl
+*.faiss

@@ -1,0 +1,88 @@
+🧠 MEMORY VDB — STEP 16: DRIVE_UPLOAD.PY
+─────────────────────────────────────────────
+❓ PURPOSE
+Safely upload finalized memory files from local Data/ zone into Drive/MemoryVDB/ cloud storage.
+
+Handles:
+- Authentication with Google Drive (via PyDrive2)
+- Folder simulation to preserve local structure
+- Logging of all uploads (success and fail)
+- Failover protection for missing or expired credentials
+
+─────────────────────────────────────────────
+🔗 SYSTEM POSITION
+
+drive_upload.py is called:
+- After memory is written by save_manager.py
+- Before task is finalized in task_queue.json
+- Optionally retried via retry_runner.py if upload fails
+
+Ensures cloud sync without risking live file loss or corruption.
+
+─────────────────────────────────────────────
+📥 INPUTS
+
+- Local memory file path (e.g., Data/Meta/AI_Architecture.txt)
+- Metadata dictionary (tags, chat name, input hash)
+
+Required Files:
+- drive_token.json → Google OAuth credentials
+- paths.json → Maps drive_root location
+
+─────────────────────────────────────────────
+📤 OUTPUTS
+
+- Uploaded file under Drive/MemoryVDB/[Zone]/[File]
+- Upload results logged into upload_log.json
+- Failures logged with reason for retrying later
+
+─────────────────────────────────────────────
+🛠️ CORE LOGIC
+
+✅ Load paths.json to resolve drive_root  
+✅ Authenticate with Google Drive using PyDrive2  
+✅ If drive_token.json missing or expired → safe fallback and log fail  
+✅ Create matching folders on Drive (simulate Data/ structure)  
+✅ Upload file safely under folder hierarchy  
+✅ Lock uploads using drive_upload.lock to prevent collisions  
+✅ Log upload attempt into upload_log.json
+
+─────────────────────────────────────────────
+🔐 FAILSAFES
+
+✅ File existence check before upload  
+✅ Drive authentication verification  
+✅ Folder auto-creation if missing  
+✅ Upload lock via FileLock  
+✅ Full logging of all attempts (success and failure)  
+✅ No overwrite of Drive files unless explicitly handled (future patch)
+
+─────────────────────────────────────────────
+📂 FILES USED
+
+- drive_upload.py → Main upload controller
+- drive_token.json → Stored OAuth credentials
+- paths.json → drive_root location setting
+- upload_log.json → Upload attempt log
+
+─────────────────────────────────────────────
+🔁 FUTURE UPGRADE PATHS
+
+🧠 Token Auto-Renewal → Detect and refresh token without failure  
+🧠 Upload Batching → Group uploads to reduce API quota usage  
+🧠 Delta Sync → Upload only files changed since last sync (hash check)  
+🧠 Multi-Account Drive Support → Parallel cloud sync across accounts  
+🧠 Intelligent Retry → Exponential backoff on repeated failures
+
+─────────────────────────────────────────────
+📌 MODULE SIGNATURE
+
+- Architect: ChatGPT (Gina) + [User]
+- Module: Step 16 — Drive Upload Handler
+- Controller: drive_upload.py
+- Version: v1.0
+- Last Updated: 2025-04-28
+- File Type: Informational spec (for AI memory + backend reconstruction)
+
+─────────────────────────────────────────────
+✅ Step 16 is now fully specified and documented.

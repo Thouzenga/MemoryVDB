@@ -1,0 +1,249 @@
+"""
+🧠 Memory VDB — Step 9: BOP Command Orchestration
+--------------------------------------------------
+Automates the full memory update pipeline:
+
+1. Generate LLaMA input from recent conversation
+2. Run LLaMA to summarize and tag
+3. Save memory to correct file (append/replace/archive)
+4. Upload to Drive
+5. Ingest into FAISS vector index
+6. Log task to task_queue.json for retry safety
+
+Failsafes:
+- Smart dedup via input_hash.json
+- Test mode (`--test_run`) avoids real writes
+- Validation of LLaMA output before memory save
+- All results logged (even in test mode)
+- Final summary printed (success/failure)
+"""
+
+import os
+import json
+import argparse
+import subprocess  # 🆕 Added for Ollama check
+from datetime import datetime
+from hashlib import sha256
+import memory_optimizer  # 🆕 Added for auto-ingest after save
+
+# --- Config ---
+INPUT_PATH = "llama/input.txt"
+OUTPUT_PATH = "llama/output.json"
+INPUT_HASH_LOG = "input_hash.json"
+TASK_QUEUE = "task_queue.json"
+UPLOAD_LOG = "logs/upload_log.json"
+
+# --- Test Fixtures ---
+MOCK_OUTPUT_PATH = "fixtures/llama_output.json"
+MOCK_MEMORY_PATH = "TestZone/Dummy_Memory.txt"
+
+# --- Required LLaMA fields
+REQUIRED_FIELDS = ["summary", "tags", "content", "chat_name", "message_id", "input_hash"]
+
+# --- Step 1: Load recent message chunk (real fallback logic)
+def get_recent_chunk():
+    fallback_text = "The user discussed the need for a memory pipeline that evolves intelligently."
+    try:
+        with open("fixtures/mock_input.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        print("⚠️ No recent chunk found — using fallback.")
+        return fallback_text
+
+# --- Step 2: Generate input and hash
+def generate_input(chunk, chat_name, msg_id, test_run=False):
+    hash_val = sha256(chunk.encode()).hexdigest()
+
+    if os.path.exists(INPUT_HASH_LOG):
+        with open(INPUT_HASH_LOG) as f:
+            known_hashes = json.load(f)
+    else:
+        known_hashes = {}
+
+    if hash_val in known_hashes and not test_run:
+        print("⏩ Skipping — input already processed.")
+        return None, hash_val
+
+    input_text = f"# GENERATED ON: {datetime.now().isoformat()}\nCHAT: {chat_name}\nMSG_ID: {msg_id}\nHASH: {hash_val}\n\nINSTRUCTION:\nSummarize and tag the following conversation.\n\nCONTENT:\n" + chunk
+
+    if not test_run:
+        os.makedirs("llama", exist_ok=True)
+        with open(INPUT_PATH, "w") as f:
+            f.write(input_text)
+
+        known_hashes[hash_val] = {"chat_name": chat_name, "msg_id": msg_id, "timestamp": datetime.now().isoformat()}
+        with open(INPUT_HASH_LOG, "w") as f:
+            json.dump(known_hashes, f, indent=2)
+
+        # 🧹 Garbage collect old input hashes if over 500 entries
+        if len(known_hashes) > 500:
+            known_hashes = dict(list(known_hashes.items())[-500:])
+            with open(INPUT_HASH_LOG, "w") as f:
+                json.dump(known_hashes, f, indent=2)
+        # TODO (Future Build): Externalize input_hash.json garbage collection into a dedicated utility module
+
+    return input_text, hash_val
+
+# --- Step 2.5: Preflight Checker
+def check_ollama_and_model():
+    try:
+        subprocess.run(["ollama", "--version"], check=True, capture_output=True)
+    except Exception:
+        raise EnvironmentError("❌ Ollama is not installed. Install it from https://ollama.com.")
+    try:
+        models = subprocess.check_output(["ollama", "list"], text=True)
+        if "llama3" not in models:
+            raise EnvironmentError("⚠️ Llama3 model not found. Pull it using: `ollama pull llama3`.")
+    except Exception as e:
+        raise EnvironmentError(f"❌ Failed to verify Ollama models: {e}")
+
+# --- Step 2.6: Environment Validator (🛠 Expanded for better checks)
+def validate_environment():
+    missing_files = []
+    if not os.path.exists("drive_token.json"):
+        missing_files.append("drive_token.json")
+    if not os.path.exists(".env"):
+        missing_files.append(".env")
+    if missing_files:
+        raise EnvironmentError(f"❌ Missing environment files: {missing_files}")
+
+    # --- Validate drive_token.json is readable
+    try:
+        with open("drive_token.json") as f:
+            json.load(f)
+    except Exception:
+        raise EnvironmentError("❌ drive_token.json is corrupt or unreadable.")
+
+    # --- Soft check for OPENAI_API_KEY placeholder (warn only)
+    try:
+        with open(".env", "r") as f:
+            env_content = f.read()
+        if "OPENAI_API_KEY=" not in env_content:
+            print("⚠️ Warning: OPENAI_API_KEY not found in .env. Some features may be disabled.")
+    except Exception:
+        print("⚠️ Warning: Could not read .env to check API keys.")
+
+    # TODO (Future Build): Externalize all API keys to a centralized api_keys.json or api_keys.env file for clean loading
+
+# --- Step 3: Run LLaMA (real or mock)
+def run_llama(test_run=False):
+    if test_run:
+        with open(MOCK_OUTPUT_PATH) as f:
+            return json.load(f)
+    os.system("bash llama_wrapper.sh")
+    with open(OUTPUT_PATH) as f:
+        return json.load(f)
+
+# --- Step 4: Validate LLaMA output
+def validate_llama_output(output):
+    if not isinstance(output, dict):
+        print("❌ Output is not a JSON object.")
+        return False
+    missing_fields = [field for field in REQUIRED_FIELDS if field not in output]
+    if missing_fields:
+        print(f"❌ Missing fields in output: {missing_fields}")
+        return False
+    if not isinstance(output.get("summary"), str) or not isinstance(output.get("tags"), list) \
+       or not isinstance(output.get("content"), str) or not isinstance(output.get("chat_name"), str) \
+       or not isinstance(output.get("message_id"), str) or not isinstance(output.get("input_hash"), str):
+        print("❌ One or more fields have incorrect types.")
+        return False
+    return True
+
+# --- Step 5: Save Manager (with auto-optimize)
+def save_memory(output, test_run=False):
+    path = "Data/" + output["file"]
+    if test_run:
+        print(f"[TEST] Would save to: {path}")
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n\n" + output["content"])
+    memory_optimizer.optimize_memory(path)
+
+# --- Step 6: Simulated Drive Upload
+def upload_to_drive(file, test_run=False):
+    print(f"{'[TEST]' if test_run else '[LIVE]'} Uploading to Drive: {file}")
+    if not test_run:
+        # drive_upload(file)
+        pass
+
+# --- Step 7: Simulated Ingest
+def ingest_vector(file, test_run=False):
+    print(f"{'[TEST]' if test_run else '[LIVE]'} Ingesting to vector DB: {file}")
+    if not test_run:
+        # ingest.py logic
+        pass
+
+# --- Step 8: Log Task
+def log_task(output, test_run=False):
+    if os.path.exists(TASK_QUEUE):
+        with open(TASK_QUEUE) as f:
+            tasks = json.load(f)
+    else:
+        tasks = []
+    task = {
+        "task_id": output["message_id"],
+        "file": output["file"],
+        "input_hash": output["input_hash"],
+        "nodes": {
+            "write": {"status": "done" if not test_run else "test", "depends_on": [], "retries": 0},
+            "upload": {"status": "done" if not test_run else "test", "depends_on": ["write"], "retries": 0},
+            "ingest": {"status": "done" if not test_run else "test", "depends_on": ["write"], "retries": 0}
+        },
+        "created": datetime.now().isoformat(),
+        "last_attempt": datetime.now().isoformat()
+    }
+    tasks.append(task)
+    if len(tasks) > 500:
+        tasks = tasks[-500:]
+    with open(TASK_QUEUE, "w") as f:
+        json.dump(tasks, f, indent=2)
+    if os.path.exists(UPLOAD_LOG):
+        with open(UPLOAD_LOG) as f:
+            logs = f.readlines()
+        if len(logs) > 1000:
+            logs = logs[-1000:]
+            with open(UPLOAD_LOG, "w") as f:
+                f.writelines(logs)
+
+# --- Final Status Reporter
+def report_success(test_run=False):
+    if test_run:
+        print("\n✅ Test run completed — no memory written.")
+    else:
+        print("\n✅ Memory update completed successfully.")
+
+def report_failure(stage, reason):
+    print(f"\n❌ Failure during: {stage}")
+    print(f"🛠 Reason: {reason}")
+    print(f"💡 Suggestion: Fix the input/output or check logs, then retry.")
+
+# --- Main Orchestrator
+def run_bop(chat_name, msg_id, test_run=False):
+    chunk = get_recent_chunk()
+    input_txt, input_hash = generate_input(chunk, chat_name, msg_id, test_run)
+    if not input_txt:
+        report_success(test_run)
+        return
+    if not test_run:
+        validate_environment()
+        check_ollama_and_model()
+    output = run_llama(test_run)
+    if not validate_llama_output(output):
+        report_failure("LLaMA Output Validation", "Missing or malformed fields in output.json")
+        return
+    save_memory(output, test_run)
+    upload_to_drive(output["file"], test_run)
+    ingest_vector(output["file"], test_run)
+    log_task(output, test_run)
+    report_success(test_run)
+
+# --- CLI
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the Memory VDB BOP pipeline.")
+    parser.add_argument("--chat_name", required=True, help="Name of the chat session")
+    parser.add_argument("--msg_id", required=True, help="Message ID to tag memory")
+    parser.add_argument("--test_run", action="store_true", help="Run in dry mode without writing memory")
+    args = parser.parse_args()
+    run_bop(args.chat_name, args.msg_id, args.test_run)

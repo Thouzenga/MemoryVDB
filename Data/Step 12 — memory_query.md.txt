@@ -1,0 +1,140 @@
+🧠 Memory VDB — Step 12: Memory Query Engine
+-----------------------------------------------------
+Allows GPT, agents, or users to semantically or tag-search stored memory zones.
+
+Built-in Safeguards:
+✅ score threshold cutoff
+✅ zone validation
+✅ fallback safe errors
+✅ full query logging
+✅ cache deduplication (new)
+
+"""
+
+import os
+import json
+import hashlib
+from datetime import datetime
+import faiss
+from vector_tools import embed_text, load_faiss_index
+
+# --- Config
+PATHS_FILE = "paths.json"
+QUERY_LOG_FILE = "query_logs.json"
+QUERY_ERROR_FILE = "query_errors.json"
+QUERY_CACHE_PATH = "logs/query_cache.json"
+
+DEFAULT_SCORE_THRESHOLD = 0.5
+DEFAULT_RESULT_LIMIT = 5
+
+# --- Cache Functions (NEW)
+def load_query_cache():
+    if not os.path.exists(QUERY_CACHE_PATH):
+        return {}
+    with open(QUERY_CACHE_PATH) as f:
+        return json.load(f)
+
+def save_query_cache(cache):
+    with open(QUERY_CACHE_PATH, "w") as f:
+        json.dump(cache, f, indent=2)
+
+def hash_query(query):
+    return hashlib.sha256(query.encode()).hexdigest()
+
+# --- Load paths.json
+def load_paths():
+    if not os.path.exists(PATHS_FILE):
+        raise FileNotFoundError("paths.json missing")
+    with open(PATHS_FILE) as f:
+        return json.load(f)
+
+# --- Query memory with caching (NEW)
+def query_with_cache(query_string, zone, mode="text", score_threshold=DEFAULT_SCORE_THRESHOLD, limit=DEFAULT_RESULT_LIMIT, force_refresh=False):
+    cache = load_query_cache()
+    query_hash = hash_query(f"{zone}:{mode}:{query_string}")
+
+    if not force_refresh and query_hash in cache:
+        print(f"🔎 Cache hit for query: {query_string[:50]}...")
+        return cache[query_hash]
+
+    fresh_result = query_memory(query_string, zone, mode, score_threshold, limit)
+    cache[query_hash] = fresh_result
+    save_query_cache(cache)
+    return fresh_result
+
+# --- Core query function
+def query_memory(query_string, zone, mode="text", score_threshold=DEFAULT_SCORE_THRESHOLD, limit=DEFAULT_RESULT_LIMIT):
+    try:
+        paths = load_paths()
+        index_path = paths["index_map"].get(zone)
+
+        if not index_path:
+            log_error("Invalid zone: " + zone)
+            return []
+
+        index, metadata = load_faiss_index(index_path)
+
+        if mode == "text":
+            query_vector = embed_text([query_string])[0]
+            scores, indices = index.search(query_vector.reshape(1, -1), limit)
+            results = []
+
+            for score, idx in zip(scores[0], indices[0]):
+                if idx == -1 or score < score_threshold:
+                    continue
+                entry = metadata[idx]
+                entry["score"] = round(float(score), 4)
+                results.append(entry)
+
+            log_query(query_string, zone, mode, len(results))
+            return results
+
+        elif mode == "tags":
+            results = []
+            for entry in metadata:
+                if any(tag.lower() in (query_string.lower(),) for tag in entry.get("tags", [])):
+                    results.append(entry)
+            log_query(query_string, zone, mode, len(results))
+            return results
+
+        else:
+            log_error(f"Unknown query mode: {mode}")
+            return []
+
+    except Exception as e:
+        log_error(str(e))
+        return []
+
+# --- Logging functions
+def log_query(query_string, zone, mode, result_count):
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "query": query_string,
+        "zone": zone,
+        "mode": mode,
+        "results": result_count
+    }
+    with open(QUERY_LOG_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+def log_error(message):
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "error": message
+    }
+    with open(QUERY_ERROR_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+if __name__ == "__main__":
+    # Example local run
+    prompt = "How does LLaMA handle memory updates?"
+    result = query_with_cache(prompt, zone="Meta", mode="text")
+    print(json.dumps(result, indent=2))
+
+📦 Output Files
+
+| File | Purpose |
+|------|---------|
+| query_logs.json | Tracks every query attempt |
+| query_errors.json | Logs failures safely |
+| query_cache.json | (NEW) Deduplicates identical queries |
